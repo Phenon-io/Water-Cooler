@@ -51,7 +51,7 @@ volatile unsigned int* my_ADC_DATA = (unsigned int*) 0x78;
 
 
 // LCD pins <--> Arduino pins
-const int RS = 11, EN = 12, D4 = 2, D5 = 3, D6 = 4, D7 = 5;
+const int RS = 11, EN = 12, D4 = 66, D5 = 67, D6 = 68, D7 = 69;
 LiquidCrystal lcd(RS, EN, D4, D5, D6, D7);
 
 //===CLOCK===
@@ -85,7 +85,7 @@ enum State{
   ERROR,
   RUNNING
 };
-State current_state = DISABLED;
+State current_state;
 
 /*
 ISR(PCINT0_vect){
@@ -133,24 +133,28 @@ void setup() {
   //*my_PCICR |= (1 << PCIE0);
   //*my_PCMSK1 |= (1 << PCINT0);
   //sei();
-  attachInterrupt(digitalPinToInterrupt(20), interrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(2), interrupt, FALLING);
   sei();
   //OUTPUTS
   // LED pins (fan motor is on 6)
-  *ddr_a |= (1 << 0) | (1 << 2) | (1 << 4) | (1 << 6);
+  *ddr_a |= (1 << 0) | (1 << 3) | (1 << 4) | (1 << 6);
   // fan motor pin (if I move it later)
   // *ddr_a |= (1 << 6);
   // STEPPER USES LIBRARY
   // LCD IS NOT HANDLED WITH PORTS/PINS, IT USES A LIBRARY
-
+  current_state = DISABLED;
 }
 void interrupt(){
-  Serial.println("interrupt\n");
   current_state = IDLE;
 }
 void loop() {
   //COMPONENT TESTS
-  test_rtc();
+  wait(1);
+  
+  //Serial.println(adc_read());
+  display();
+
+
   unsigned char buffer[50] = {'a'};
   unsigned char tmbuffer[9];
   const char* timestamp = rtc.now().timestamp(DateTime::TIMESTAMP_TIME).c_str();
@@ -158,59 +162,59 @@ void loop() {
   unsigned char* justN[2] = {'\n', '\0'};
   int stringLength = 0;
   
-  
   int n = 0;
   //Note: this gets a lot cleaner if a function is made for transition messages
-  switch (current_state) {
-    case DISABLED:
-      unsigned char disabled_message[] = "Transitioned to Disabled at ";
-      sprintf(buffer, "%s%s%s", disabled_message, tmbuffer, justN);
-      stringLength = strlen((char*)buffer);
-      n = 0;
-      while(n < stringLength) U0putchar(buffer[n++]);
-      disabled();
-      break;
-    case IDLE:
-      
-      unsigned char idle_message[] = "Transitioned to Idle at ";
-      sprintf(buffer, "%s%s%s", idle_message, tmbuffer, justN);
-      stringLength = strlen((char*)buffer);
-      n = 0;
-      while(n < stringLength) U0putchar(buffer[n++]);
-      idle();
-      break;
-    case RUNNING:
-      unsigned char running_message[] = "Transitioned to Running at ";
-      sprintf(buffer, "%s%s%s", running_message, tmbuffer, justN);
-      stringLength = strlen((char*)buffer);
-      n = 0;
-      while(n < stringLength) U0putchar(buffer[n++]);
-      running();
-      break;
+  
+  
+  if (current_state == DISABLED) {
+  unsigned char disabled_message[] = "Transitioned to Disabled at ";
+  sprintf(buffer, "%s%s%s", disabled_message, tmbuffer, justN);
+  stringLength = strlen((char*)buffer);
+  n = 0;
+  //while (n < 39) U0putchar(buffer[n++]);
+  disabled();
+  } else if (current_state == IDLE) {
+    unsigned char idle_message[] = "Transitioned to Idle at ";
+    sprintf(buffer, "%s%s%s", idle_message, tmbuffer, justN);
+    stringLength = strlen((char*)buffer);
+    n = 0;
+    //while (n < 35) U0putchar(buffer[n++]);
+    idle();
+  } else if (current_state == RUNNING) {
+    unsigned char running_message[] = "Transitioned to Running at ";
+    sprintf(buffer, "%s%s%s", running_message, tmbuffer, justN);
+    stringLength = strlen((char*)buffer);
+    n = 0;
+    //while (n < 38) U0putchar(buffer[n++]);
+    running();
   }
-  wait(10); //wait 10 seconds
+  else;
+  //wait(1); //wait 10 seconds
 }
 void disabled(){
-  Serial.println("made it here\n");
-  if(digitalRead(20) == LOW){
-    Serial.println("pin is low\n");
-  }
   // this function does nothing but wait for an interupt
   led_update();
-  while(1){
-    if(current_state == IDLE) return;
+  while(current_state != IDLE){
+    wait(1);
+    if(current_state == IDLE) {
+      return;
+    }
   }
+  return;
 }
 void idle(){
   led_update();
   int water_reading = 0;
   float water_level = 0;
+  
+  display();
   while(1){
     if(rtc.now() >= now+60) display();
     water_reading = adc_read() - '0';
     water_level = (water_reading * 5.0) / W_DENOMINATOR;
     Serial.println(water_level);
     if(*pin_k & (1 << 1)){
+      Serial.println("made it here\n");
       current_state = DISABLED;
       return;
     }
@@ -218,6 +222,7 @@ void idle(){
       vent_update();
     }
     if(dht.readTemperature() > threshold){
+      
       current_state = RUNNING;
       return;
     }
@@ -262,9 +267,11 @@ void error(char* error){
   }
 }
 void running(){
+  wait(1);
   led_update();
   int water_reading = 0;
   float water_level = 0;
+  display();
   while(1){
     water_reading = adc_read() - '0';
     water_level = (water_reading * 5.0) / W_DENOMINATOR;
@@ -362,13 +369,14 @@ void test_DHT(){
   
 }
 void display(){
-  int temperature = dht.readTemperature();
-  int humidity = dht.readHumidity();
+  Serial.println((double)dht.readTemperature());
+  int temperature = (int)dht.readTemperature();
+  int humidity = (int)dht.readHumidity();
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print(temperature, DEC);
+  lcd.print(temperature);
   lcd.setCursor(0,1);
-  lcd.print(humidity, DEC);
+  lcd.print(humidity);
 }
 void U0putchar(unsigned char U0pdata)
 {
@@ -389,7 +397,7 @@ void vent_update(){
   while(n < strlen((const char*)buffer)) U0putchar(buffer[n++]);
 }
 void led_update(){
-  *pin_a &= 0x00; //clear all LEDs
+  while(*pin_a & 0x00) *pin_a &= 0x00; //clear all LEDs
   //LEDs are under PA0,2,4,6
   //0 IDLE
   //2 DISABLED
@@ -397,7 +405,7 @@ void led_update(){
   //6 RUNNING
   switch(current_state){
     case DISABLED:
-      *pin_a |= (1 << 2);
+      *pin_a |= (1 << 3);
       break;
     case IDLE:
       *pin_a |= (1 << 0);
